@@ -1,0 +1,6 @@
+CompileFlags:
+  # _GNU_SOURCE exposes cpu_set_t, CPU_SET/ZERO, pthread_setaffinity_np, etc.
+  # --target tells clangd to use aarch64 headers when resolving Linux-specific types.
+  Add:
+    - -D_GNU_SOURCE
+    - --target=aarch64-linux-gnu

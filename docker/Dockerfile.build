@@ -1,0 +1,13 @@
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# aarch64 cross-compiler + build tools.
+# Linux kernel UAPI headers (linux/gpio.h, linux/i2c-dev.h, linux/spi/spidev.h)
+# are included via the cross-toolchain — no external libraries needed.
+RUN apt-get update -q && apt-get install -y --no-install-recommends \
+        gcc-aarch64-linux-gnu \
+        g++-aarch64-linux-gnu \
+        cmake \
+        make \
+    && rm -rf /var/lib/apt/lists/*

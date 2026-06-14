@@ -1,0 +1,6 @@
+build/
+*.tar.gz
+*.DS_Store
+*.swp
+*.o
+compile_commands.json

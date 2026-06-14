@@ -1,0 +1,26 @@
+[Unit]
+Description=Cook Industrial Automation Controller
+After=local-fs.target
+DefaultDependencies=no
+# Prevent boot loops: stop restarting after 5 failures within 2 minutes.
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cook
+# Restart only on abnormal exit (crash, signal); not on clean exit (code 0).
+Restart=on-failure
+RestartSec=5
+User=root
+# Bind the service to core 3 at the cgroup level — enforced even before
+# the process calls pthread_setaffinity_np().
+CPUAffinity=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cook
+LimitNOFILE=1024
+OOMScoreAdjust=-900
+
+[Install]
+WantedBy=multi-user.target
