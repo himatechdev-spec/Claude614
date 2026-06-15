@@ -201,14 +201,33 @@ static RS485::Response modbusResponse(size_t expectedLen, int timeoutMs) {
     return r;
 }
 
+// Send a request and read a response, retrying up to 3 times on transport errors.
+// Slave exception responses (0x01–0x08) are returned immediately without retry —
+// the slave received and rejected the request; retrying won't change the outcome.
+// sendRaw() flushes the RX buffer at the start of each attempt, so any bytes
+// left over from a corrupted previous response are cleared automatically.
+static RS485::Response modbusTransaction(const uint8_t* pdu, size_t pduLen,
+                                          size_t expectedLen, int timeoutMs) {
+    RS485::Response r{false, RS485::Error::Timeout, {}};
+    for (int attempt = 0; attempt < 3; attempt++) {
+        if (!modbusRequest(pdu, pduLen))
+            return {false, RS485::Error::FrameError, {}};
+        r = modbusResponse(expectedLen, timeoutMs);
+        if (r.ok) return r;
+        auto ec = static_cast<uint8_t>(r.err);
+        if (ec >= 0x01 && ec <= 0x08) return r;  // definitive slave exception
+        // Transport error (Timeout / CRCMismatch / FrameError): retry
+    }
+    return r;
+}
+
 // ── FC 0x01 — Read Coils ─────────────────────────────────────────────────────
 
 RS485::Response RS485::readCoils(uint8_t slave, uint16_t start, uint16_t count, int tms) {
     uint8_t pdu[6] = { slave, 0x01,
                         (uint8_t)(start >> 8), (uint8_t)start,
                         (uint8_t)(count >> 8), (uint8_t)count };
-    if (!modbusRequest(pdu, 6)) return {false, Error::FrameError, {}};
-    return modbusResponse(3 + (count + 7u) / 8u, tms);
+    return modbusTransaction(pdu, 6, 3 + (count + 7u) / 8u, tms);
 }
 
 // ── FC 0x02 — Read Discrete Inputs ───────────────────────────────────────────
@@ -217,8 +236,7 @@ RS485::Response RS485::readDiscreteInputs(uint8_t slave, uint16_t start, uint16_
     uint8_t pdu[6] = { slave, 0x02,
                         (uint8_t)(start >> 8), (uint8_t)start,
                         (uint8_t)(count >> 8), (uint8_t)count };
-    if (!modbusRequest(pdu, 6)) return {false, Error::FrameError, {}};
-    return modbusResponse(3 + (count + 7u) / 8u, tms);
+    return modbusTransaction(pdu, 6, 3 + (count + 7u) / 8u, tms);
 }
 
 // ── FC 0x03 — Read Holding Registers ─────────────────────────────────────────
@@ -227,8 +245,7 @@ RS485::Response RS485::readHoldingRegisters(uint8_t slave, uint16_t start, uint1
     uint8_t pdu[6] = { slave, 0x03,
                         (uint8_t)(start >> 8), (uint8_t)start,
                         (uint8_t)(count >> 8), (uint8_t)count };
-    if (!modbusRequest(pdu, 6)) return {false, Error::FrameError, {}};
-    return modbusResponse(3u + count * 2u, tms);
+    return modbusTransaction(pdu, 6, 3u + count * 2u, tms);
 }
 
 // ── FC 0x04 — Read Input Registers ───────────────────────────────────────────
@@ -237,8 +254,7 @@ RS485::Response RS485::readInputRegisters(uint8_t slave, uint16_t start, uint16_
     uint8_t pdu[6] = { slave, 0x04,
                         (uint8_t)(start >> 8), (uint8_t)start,
                         (uint8_t)(count >> 8), (uint8_t)count };
-    if (!modbusRequest(pdu, 6)) return {false, Error::FrameError, {}};
-    return modbusResponse(3u + count * 2u, tms);
+    return modbusTransaction(pdu, 6, 3u + count * 2u, tms);
 }
 
 // ── FC 0x05 — Write Single Coil ──────────────────────────────────────────────
@@ -247,8 +263,7 @@ RS485::Response RS485::writeCoil(uint8_t slave, uint16_t coil, bool on, int tms)
     uint8_t pdu[6] = { slave, 0x05,
                         (uint8_t)(coil >> 8), (uint8_t)coil,
                         on ? (uint8_t)0xFF : (uint8_t)0x00, 0x00 };
-    if (!modbusRequest(pdu, 6)) return {false, Error::FrameError, {}};
-    return modbusResponse(6, tms);  // slave echoes the request
+    return modbusTransaction(pdu, 6, 6, tms);
 }
 
 // ── FC 0x06 — Write Single Register ──────────────────────────────────────────
@@ -257,8 +272,7 @@ RS485::Response RS485::writeRegister(uint8_t slave, uint16_t reg, uint16_t value
     uint8_t pdu[6] = { slave, 0x06,
                         (uint8_t)(reg >> 8), (uint8_t)reg,
                         (uint8_t)(value >> 8), (uint8_t)value };
-    if (!modbusRequest(pdu, 6)) return {false, Error::FrameError, {}};
-    return modbusResponse(6, tms);
+    return modbusTransaction(pdu, 6, 6, tms);
 }
 
 // ── FC 0x0F — Write Multiple Coils ───────────────────────────────────────────
@@ -279,8 +293,7 @@ RS485::Response RS485::writeCoils(uint8_t slave, uint16_t start,
     for (size_t i = 0; i < values.size(); ++i)
         if (values[i]) pdu[7 + i / 8] |= (uint8_t)(1u << (i % 8));
 
-    if (!modbusRequest(pdu, pduLen)) return {false, Error::FrameError, {}};
-    return modbusResponse(6, tms);  // slave echoes addr, FC, start, count
+    return modbusTransaction(pdu, pduLen, 6, tms);
 }
 
 // ── FC 0x10 — Write Multiple Registers ───────────────────────────────────────
@@ -302,8 +315,7 @@ RS485::Response RS485::writeRegisters(uint8_t slave, uint16_t start,
         pdu[7 + i * 2 + 1] = (uint8_t) values[i];
     }
 
-    if (!modbusRequest(pdu, pduLen)) return {false, Error::FrameError, {}};
-    return modbusResponse(6, tms);
+    return modbusTransaction(pdu, pduLen, 6, tms);
 }
 
 // ── Broadcast ─────────────────────────────────────────────────────────────────
