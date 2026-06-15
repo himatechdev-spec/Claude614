@@ -100,10 +100,14 @@ static void rs485Worker() {
         }
 
         auto r = RS485::writeRegister(req.slave, req.reg, req.value);
-        std::cout << "[rs485] writeRegister(slave=" << (int)req.slave
-                  << ", reg=" << req.reg
-                  << ", val=" << req.value
-                  << ")  →  " << (r.ok ? "OK" : "FAIL") << "\n";
+        if (r.ok) {
+            std::cout << "[rs485] writeRegister(slave=" << (int)req.slave
+                      << ", reg=" << req.reg << ", val=" << req.value << ")  →  OK\n";
+        } else {
+            std::cout << "[rs485] writeRegister(slave=" << (int)req.slave
+                      << ", reg=" << req.reg << ", val=" << req.value
+                      << ")  →  FAIL err=0x" << std::hex << (int)r.err << std::dec << "\n";
+        }
     }
 }
 
@@ -185,8 +189,9 @@ static void controlLoop() {
     bool     estop_prev  = false;
     PinLevel led_prev    = PinLevel::Low;
 
-    // Status report every 5 s (500 loops)
-    static constexpr uint32_t REPORT_EVERY = 500;
+    // Status report every 5 s (500 loops); RS485 write every 1 s (100 loops)
+    static constexpr uint32_t REPORT_EVERY  = 500;
+    static constexpr uint32_t RS485_EVERY   = 100;
 
     while (g_running) {
         next += LOOP_PERIOD;
@@ -217,19 +222,19 @@ static void controlLoop() {
             estop_prev = estop;
         }
 
-        // --- Periodic status report + RS485 write (every 5 s) ---
+        // --- Periodic status report (every 5 s) ---
         if (loop % REPORT_EVERY == 0) {
             std::cout << "[cook] loop=" << loop
                       << "  jitter_max=" << jitter_max << "µs"
                       << "  estop=" << (estop ? "ACTIVE" : "OK") << "\n";
             jitter_max = 0;   // reset window
+        }
 
-            // Hand the write off to the RS485 worker thread — non-blocking.
-            if (s_rs485_ok) {
-                if (!enqueueRS485(1, 10, s_rs485_i))
-                    std::cout << "[cook] RS485 queue full — request dropped\n";
-                ++s_rs485_i;
-            }
+        // --- RS485 write every 1 s: slave=2, reg=10, value increments each second ---
+        if (s_rs485_ok && loop % RS485_EVERY == 0) {
+            if (!enqueueRS485(2, 10, s_rs485_i))
+                std::cout << "[cook] RS485 queue full — request dropped\n";
+            ++s_rs485_i;
         }
 
         // TODO: add control logic here

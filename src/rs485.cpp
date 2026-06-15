@@ -78,9 +78,10 @@ bool RS485::begin(const std::string& device, uint32_t baud, uint8_t dePin) {
     s_dePin  = dePin;
     s_lastTx = std::chrono::steady_clock::now() - std::chrono::seconds(1);
 
-    // Ensure transceiver starts in receive mode
-    GPIO::setMode(dePin, PinMode::Output);
-    GPIO::write(dePin, PinLevel::Low);
+    if (dePin != 0xFF) {
+        GPIO::setMode(dePin, PinMode::Output);
+        GPIO::write(dePin, PinLevel::Low);
+    }
     return true;
 }
 
@@ -103,14 +104,17 @@ bool RS485::sendRaw(const uint8_t* data, size_t len) {
 
     tcflush(s_fd, TCIFLUSH);               // discard stale RX bytes
 
-    GPIO::write(s_dePin, PinLevel::High);  // enable driver (TX mode)
-    usleep(50);                             // transceiver enable settling
+    if (s_dePin != 0xFF) {
+        GPIO::write(s_dePin, PinLevel::High);  // enable driver (TX mode)
+        usleep(50);                             // transceiver enable settling
+    }
 
     ssize_t written = write(s_fd, data, len);
-    tcdrain(s_fd);                          // wait until kernel buffer is in shift reg
-    usleep(s_charTime_us);                  // wait for last byte to finish transmitting
+    tcdrain(s_fd);                          // wait for TX FIFO + shift register to drain
 
-    GPIO::write(s_dePin, PinLevel::Low);   // enable receiver (RX mode)
+    if (s_dePin != 0xFF) {
+        GPIO::write(s_dePin, PinLevel::Low);   // enable receiver (RX mode) immediately after last bit
+    }
     s_lastTx = std::chrono::steady_clock::now();
 
     return written == (ssize_t)len;
